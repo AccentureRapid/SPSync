@@ -758,6 +758,64 @@ namespace SPSync.Core
                             }
                         }
                     }
+                    else if (item.Status == ItemStatus.DeletedLocal && syncToLocal)
+                    {
+                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Updating local file {0}...", item.Name));
+
+                        string fullNameNotSynchronized = item.LocalFile + ".spsync";
+
+                        int etag;
+                        var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
+                        item.ETag = etag;
+                        item.LastModified = remoteTimestamp;
+
+                        try
+                        {
+                            if (File.Exists(item.LocalFile))
+                            {
+                                _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile), Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
+                                item.Status = ItemStatus.Unchanged;
+                                return;
+                            }
+
+                            if (File.Exists(fullNameNotSynchronized))
+                            {
+                                item.Status = ItemStatus.Unchanged;
+                                return;
+                            }
+
+                            CreateFoldersIfNotExists(item.LocalFolder);
+
+                            if (_configuration.DownloadHeadersOnly)
+                            {
+                                File.Create(fullNameNotSynchronized).Close();
+                                File.SetLastWriteTimeUtc(fullNameNotSynchronized, remoteTimestamp);
+                            }
+                            else
+                            {
+                                _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile), Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
+                            }
+
+                            item.Status = ItemStatus.Unchanged;
+                        }
+                        catch (System.Net.WebException ex)
+                        {
+                            if (ex.InnerException != null && ex.InnerException is IOException)
+                            {
+                                //item.Status = ItemStatus.Unchanged;
+
+                                OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
+                            }
+                            else
+                            {
+                                item.HasError = true;
+                                item.LastError = ex.Message;
+
+                                OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Error, "WebException", ex);
+                                throw;
+                            }
+                        }
+                    }
                     else if (item.Status == ItemStatus.DeletedLocal && syncToRemote)
                     {
                         OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Deleting remote file {0}...", item.Name));
